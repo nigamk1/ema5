@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: ema5-alert-system
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: UPSTOX_ACCESS_TOKEN
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: INSTRUMENT_KEY
+        value: NSE_INDEX|NIFTY 50
+      - key: TIMEFRAME
+        value: 5minute
+      - key: EMA_PERIOD
+        value: 5
+      - key: LOG_LEVEL
+        value: info
+      - key: ALERT_COOLDOWN_MINUTES
+        value: 2
+      - key: PORT
+        value: 10000

@@ -1,5 +1,6 @@
 require('dotenv').config();
 const axios = require('axios');
+const http = require('http');
 
 // Configuration from environment variables
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -10,6 +11,7 @@ const TIMEFRAME = process.env.TIMEFRAME || '5minute';
 const EMA_PERIOD = parseInt(process.env.EMA_PERIOD) || 5;
 const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
 const ALERT_COOLDOWN_MINUTES = parseInt(process.env.ALERT_COOLDOWN_MINUTES) || 2;
+const PORT = process.env.PORT || 10000;
 
 // Global state variables for two-stage strategy
 let isRunning = false;
@@ -302,6 +304,52 @@ const isMarketHours = () => {
     return currentTime >= 915 && currentTime <= 1530;
 };
 
+// Create HTTP server for health checks (required for Render deployment)
+const createHealthServer = () => {
+    const server = http.createServer((req, res) => {
+        if (req.url === '/health' && req.method === 'GET') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                status: 'healthy',
+                service: 'EMA(5) Alert System',
+                timestamp: new Date().toISOString(),
+                uptime: process.uptime(),
+                isMarketHours: isMarketHours(),
+                alertCandle: alertCandle ? 'Active' : 'None',
+                waitingForBreakdown: isWaitingForBreakdown
+            }));
+        } else if (req.url === '/' && req.method === 'GET') {
+            res.writeHead(200, { 'Content-Type': 'text/html' });
+            res.end(`
+                <html>
+                    <head><title>EMA(5) Alert System</title></head>
+                    <body>
+                        <h1>🚀 EMA(5) Alert System for Nifty 50</h1>
+                        <p><strong>Status:</strong> Running</p>
+                        <p><strong>Market Hours:</strong> ${isMarketHours() ? 'Open' : 'Closed'}</p>
+                        <p><strong>Alert Candle:</strong> ${alertCandle ? 'Active' : 'None'}</p>
+                        <p><strong>Waiting for Breakdown:</strong> ${isWaitingForBreakdown ? 'Yes' : 'No'}</p>
+                        <p><strong>Uptime:</strong> ${Math.floor(process.uptime())} seconds</p>
+                        <hr>
+                        <p>Two-Stage Strategy: Alert Candle Detection + PUT Breakdown Signals</p>
+                        <p>Monitoring ${decodeURIComponent(INSTRUMENT_KEY)} on ${TIMEFRAME} timeframe</p>
+                    </body>
+                </html>
+            `);
+        } else {
+            res.writeHead(404, { 'Content-Type': 'text/plain' });
+            res.end('Not Found');
+        }
+    });
+
+    server.listen(PORT, () => {
+        log.info(`🌐 Health server running on port ${PORT}`);
+        log.info(`🏥 Health check available at: http://localhost:${PORT}/health`);
+    });
+
+    return server;
+};
+
 // Graceful shutdown handler
 const gracefulShutdown = () => {
     log.info('Received shutdown signal. Cleaning up...');
@@ -309,6 +357,12 @@ const gracefulShutdown = () => {
     if (monitoringInterval) {
         clearInterval(monitoringInterval);
         log.info('Monitoring interval cleared');
+    }
+    
+    if (healthServer) {
+        healthServer.close(() => {
+            log.info('Health server closed');
+        });
     }
     
     // Reset strategy state
@@ -328,6 +382,9 @@ const main = async () => {
     
     // Validate configuration
     validateConfig();
+    
+    // Start health server for Render deployment
+    const healthServer = createHealthServer();
     
     // Test Telegram connection
     await testTelegramConnection();
@@ -354,7 +411,7 @@ const main = async () => {
     log.info('📱 Stage 1: Alert Candle detection (all OHLC > EMA)');
     log.info('📱 Stage 2: PUT signal on breakdown below Alert Candle low');
     
-    return monitoringInterval;
+    return { monitoringInterval, healthServer };
 };
 
 // Test Telegram connection
@@ -391,8 +448,10 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Start the application
 let monitoringInterval;
-main().then((interval) => {
-    monitoringInterval = interval;
+let healthServer;
+main().then((services) => {
+    monitoringInterval = services.monitoringInterval;
+    healthServer = services.healthServer;
 }).catch((error) => {
     log.error(`Failed to start application: ${error.message}`);
     process.exit(1);

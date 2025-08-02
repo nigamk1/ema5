@@ -1,4 +1,5 @@
 {
+  "$schema": "https://raw.githubusercontent.com/SchemaStore/schemastore/master/src/schemas/json/package.json",
   "name": "nifty50-ema5-alert-system",
   "version": "2.0.0",
   "description": "Two-Stage EMA(5) Alert System for Nifty 50: Alert Candle Detection + PUT Breakdown Signals using Upstox API and Telegram Bot",
@@ -38,6 +39,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yourusername/ema5-alert-system.git"
+    "url": "git+https://github.com/nigamk1/ema5.git"
+  },
+  "homepage": "https://github.com/nigamk1/ema5#readme",
+  "bugs": {
+    "url": "https://github.com/nigamk1/ema5/issues"
   }
 }
