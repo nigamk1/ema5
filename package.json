@@ -1,0 +1,43 @@
+{
+  "name": "nifty50-ema5-alert-system",
+  "version": "2.0.0",
+  "description": "Two-Stage EMA(5) Alert System for Nifty 50: Alert Candle Detection + PUT Breakdown Signals using Upstox API and Telegram Bot",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "node bot.js",
+    "test": "node test-config.js",
+    "test-config": "node test-config.js",
+    "setup": "node setup.js",
+    "example": "node ema-example.js"
+  },
+  "keywords": [
+    "trading",
+    "ema",
+    "nifty50",
+    "nifty-index", 
+    "two-stage-strategy",
+    "alert-candle",
+    "put-signals",
+    "breakdown-detection",
+    "telegram",
+    "upstox",
+    "technical-analysis",
+    "5minute-timeframe",
+    "automated-alerts"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.11.0",
+    "dotenv": "^17.2.1",
+    "node-telegram-bot-api": "^0.66.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourusername/ema5-alert-system.git"
+  }
+}
