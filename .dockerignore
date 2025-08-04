@@ -1,11 +1,38 @@
-node_modules
-npm-debug.log
+# Dependencies
+node_modules/
+npm-debug.log*
+
+# Environment files
 .env
 .env.local
 .env.example
-.git
+
+# IDE files
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
 .gitignore
+
+# Documentation
 README.md
+FIXES_SUMMARY.md
+DEPLOYMENT.md
+*.md
+
+# Test files
+test-*.js
+*.test.js
+
+# Logs
+logs/
+*.log
+
+# Docker files (not needed in container)
 Dockerfile
 .dockerignore
-*.md

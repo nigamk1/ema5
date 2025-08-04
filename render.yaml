@@ -3,9 +3,10 @@ services:
     name: ema5-alert-system
     runtime: node
     plan: free
-    buildCommand: npm install
+    buildCommand: npm ci --production
     startCommand: npm start
     healthCheckPath: /health
+    autoDeploy: false
     envVars:
       - key: NODE_ENV
         value: production
