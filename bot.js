@@ -93,18 +93,25 @@ const fetchCandles = async () => {
 
 const processStrategy = async (candles) => {
     try {
-        // Get the most recent candles for analysis
-        const recentCandles = candles.slice(-(EMA_PERIOD + 1)); // EMA_PERIOD + 1 for current candle
+        // Get enough candles for EMA calculation plus current candle
+        const minRequired = EMA_PERIOD + 10; // Extra buffer for accurate EMA
+        if (candles.length < minRequired) {
+            log.info(`Not enough candle data. Available: ${candles.length}, Required: ${minRequired}`);
+            return;
+        }
         
-        // Extract close prices for EMA calculation (excluding the latest candle)
-        const closePrices = recentCandles.slice(0, EMA_PERIOD).map(candle => parseFloat(candle[4]));
+        // Get recent candles for EMA calculation
+        const recentCandles = candles.slice(-minRequired);
         
-        // Calculate EMA(5)
-        const emaValue = calculateEMA(closePrices, EMA_PERIOD);
-        const currentEMA = emaValue[emaValue.length - 1];
+        // Extract close prices for EMA calculation (all except the very latest)
+        const closePrices = recentCandles.slice(0, -1).map(candle => parseFloat(candle[4]));
         
-        // Get the latest candle for analysis
-        const [timestamp, open, high, low, close] = recentCandles[EMA_PERIOD];
+        // Calculate EMA(5) - we need the EMA value for the period before current candle
+        const emaValues = calculateEMA(closePrices, EMA_PERIOD);
+        const currentEMA = emaValues[emaValues.length - 1];
+        
+        // Get the latest completed candle for analysis
+        const [timestamp, open, high, low, close] = recentCandles[recentCandles.length - 1];
         const latestCandle = {
             timestamp: new Date(timestamp).toLocaleString('en-IN', { 
                 timeZone: 'Asia/Kolkata',
@@ -115,6 +122,7 @@ const processStrategy = async (candles) => {
                 hour: '2-digit',
                 minute: '2-digit'
             }),
+            rawTimestamp: timestamp,
             open: parseFloat(open),
             high: parseFloat(high),
             low: parseFloat(low),
@@ -126,14 +134,21 @@ const processStrategy = async (candles) => {
         
         // TWO-STAGE STRATEGY IMPLEMENTATION
         
-        // Stage 1: Check for Alert Candle (all OHLC above EMA)
+        // Stage 1: Check for Alert Candle (ALL OHLC completely above EMA)
         const isAlertCandle = latestCandle.open > currentEMA && 
                              latestCandle.high > currentEMA && 
                              latestCandle.low > currentEMA && 
                              latestCandle.close > currentEMA;
         
-        if (isAlertCandle && !isWaitingForBreakdown) {
-            // New Alert Candle detected
+        if (isAlertCandle) {
+            // If we already have an alert candle, replace it with the new one
+            if (alertCandle) {
+                log.info(`New Alert Candle detected, replacing previous Alert Candle`);
+            } else {
+                log.info(`First Alert Candle detected for monitoring`);
+            }
+            
+            // Set new Alert Candle (always replace with latest)
             alertCandle = {
                 ...latestCandle,
                 emaValue: currentEMA,
@@ -142,61 +157,51 @@ const processStrategy = async (candles) => {
             
             isWaitingForBreakdown = true;
             
-            // Check alert cooldown for Alert Candle notifications
+            // Send Alert Candle notification (with cooldown)
             const now = new Date();
             if (!lastAlertTime || (now - lastAlertTime) >= (ALERT_COOLDOWN_MINUTES * 60 * 1000)) {
                 await sendAlertCandleNotification(alertCandle);
                 lastAlertTime = now;
+                log.signal(`✅ Alert Candle notification sent! Low to watch: ${alertCandle.lowToWatch}`);
             } else {
-                log.info(`Alert Candle detected but within cooldown period. Last alert: ${lastAlertTime.toLocaleTimeString()}`);
+                log.info(`Alert Candle detected but within cooldown period (${ALERT_COOLDOWN_MINUTES}min). Last alert: ${lastAlertTime.toLocaleTimeString()}`);
             }
-            
-            log.signal(`Alert Candle identified! Low to watch: ${alertCandle.lowToWatch}`);
             
         } else if (isWaitingForBreakdown && alertCandle) {
-            // Stage 2: Monitor for breakdown of Alert Candle low
+            // Stage 2: Monitor for breakdown below Alert Candle low
             
-            if (isAlertCandle) {
-                // New Alert Candle found, replace the previous one
-                log.info(`New Alert Candle detected, replacing previous one`);
-                alertCandle = {
-                    ...latestCandle,
-                    emaValue: currentEMA,
-                    lowToWatch: latestCandle.low
-                };
-                
-                const now = new Date();
-                if (!lastAlertTime || (now - lastAlertTime) >= (ALERT_COOLDOWN_MINUTES * 60 * 1000)) {
-                    await sendAlertCandleNotification(alertCandle);
-                    lastAlertTime = now;
-                }
-                
-                log.signal(`New Alert Candle identified! Low to watch: ${alertCandle.lowToWatch}`);
-                
-            } else if (latestCandle.low < alertCandle.lowToWatch) {
+            if (latestCandle.low < alertCandle.lowToWatch) {
                 // Breakdown detected - PUT signal triggered
+                log.signal(`🔻 PUT Signal triggered! Breakdown detected`);
+                log.signal(`Current Low: ${latestCandle.low} < Alert Candle Low: ${alertCandle.lowToWatch}`);
+                
                 await sendPutSignalNotification(latestCandle, alertCandle);
                 
-                // Reset the state after PUT signal
+                // Reset the state after PUT signal is sent
                 isWaitingForBreakdown = false;
                 alertCandle = null;
+                lastAlertTime = new Date(); // Reset cooldown after PUT signal
                 
-                log.signal(`PUT Signal triggered! Breakdown at: ${latestCandle.low}`);
+                log.success(`PUT Signal sent and state reset`);
                 
             } else {
-                log.debug(`Monitoring breakdown - Current low: ${latestCandle.low}, Alert low: ${alertCandle.lowToWatch}`);
+                log.debug(`Monitoring: Current Low ${latestCandle.low} > Alert Low ${alertCandle.lowToWatch} (No breakdown yet)`);
             }
         } else {
-            log.debug('No signal conditions met - normal market condition');
+            // No alert candle conditions met
+            log.debug(`No Alert Candle: O:${latestCandle.open > currentEMA ? '✓' : '✗'} H:${latestCandle.high > currentEMA ? '✓' : '✗'} L:${latestCandle.low > currentEMA ? '✓' : '✗'} C:${latestCandle.close > currentEMA ? '✓' : '✗'} vs EMA:${currentEMA.toFixed(2)}`);
         }
         
-        // Log current state
+        // Log current monitoring state
         if (isWaitingForBreakdown && alertCandle) {
-            log.info(`Status: Waiting for breakdown below ${alertCandle.lowToWatch} (Alert Candle from ${alertCandle.timestamp})`);
+            log.info(`📊 Status: Monitoring breakdown below ${alertCandle.lowToWatch} (Alert from ${alertCandle.timestamp})`);
+        } else {
+            log.debug(`📊 Status: Waiting for new Alert Candle (all OHLC > EMA)`);
         }
 
     } catch (error) {
         log.error(`Error in strategy processing: ${error.message}`);
+        log.error(error.stack);
     }
 };
 
@@ -223,43 +228,55 @@ const calculateEMA = (prices, period) => {
 
 const sendAlertCandleNotification = async (candle) => {
     const message = `✅ *ALERT CANDLE DETECTED*
-    
+
 📈 *Nifty 50 - ${TIMEFRAME.toUpperCase()} Chart*
 🕐 Time: ${candle.timestamp}
-📊 OHLC: ${candle.open} | ${candle.high} | ${candle.low} | ${candle.close}
+
+📊 *Candle Details:*
+   Open: ${candle.open.toFixed(2)}
+   High: ${candle.high.toFixed(2)}
+   Low: ${candle.low.toFixed(2)}
+   Close: ${candle.close.toFixed(2)}
+
 📉 EMA(${EMA_PERIOD}): ${candle.emaValue.toFixed(2)}
 
-✅ *All OHLC values are above EMA(${EMA_PERIOD})*
-🎯 *Watching for breakdown below: ${candle.lowToWatch}*
+✅ *Entire candle is ABOVE EMA(${EMA_PERIOD})*
+🎯 *Watching for breakdown below: ${candle.lowToWatch.toFixed(2)}*
 
 💡 Strong bullish momentum detected!
-🔻 Monitoring for PUT entry signal...
+🔻 Will alert when price breaks below ${candle.lowToWatch.toFixed(2)}
 
 ⚠️ This is for educational purposes only`;
 
     await sendTelegramMessage(message);
-    log.success(`Alert Candle notification sent for Nifty 50`);
+    log.success(`Alert Candle notification sent`);
 };
 
 const sendPutSignalNotification = async (currentCandle, alertCandle) => {
     const message = `🔻 *PUT SIGNAL TRIGGERED*
-    
+
 📉 *Nifty 50 Breakdown Alert*
-🕐 Entry Time: ${currentCandle.timestamp}
-💥 Entry Price: ${currentCandle.low}
-📍 Alert Candle Low: ${alertCandle.lowToWatch}
-⏰ Alert Time: ${alertCandle.timestamp}
+🕐 Signal Time: ${currentCandle.timestamp}
 
-🔻 *Nifty 50 broke below Alert Candle low*
-📊 Current OHLC: ${currentCandle.open} | ${currentCandle.high} | ${currentCandle.low} | ${currentCandle.close}
+💥 *Breakdown Details:*
+   Current Low: ${currentCandle.low.toFixed(2)}
+   Alert Candle Low: ${alertCandle.lowToWatch.toFixed(2)}
+   Breakdown Amount: ${(alertCandle.lowToWatch - currentCandle.low).toFixed(2)} points
 
-🎯 *PUT Entry Opportunity Detected*
-⚠️ Consider risk management and position sizing
+⏰ *Alert Candle Details:*
+   Time: ${alertCandle.timestamp}
+   OHLC: ${alertCandle.open.toFixed(2)} | ${alertCandle.high.toFixed(2)} | ${alertCandle.low.toFixed(2)} | ${alertCandle.close.toFixed(2)}
+
+� *Current Candle:*
+   OHLC: ${currentCandle.open.toFixed(2)} | ${currentCandle.high.toFixed(2)} | ${currentCandle.low.toFixed(2)} | ${currentCandle.close.toFixed(2)}
+
+🎯 *PUT Entry Opportunity*
+💡 Consider buying PUT options at current levels
 
 ⚠️ This is for educational purposes only`;
 
     await sendTelegramMessage(message);
-    log.success(`PUT Signal notification sent for Nifty 50 breakdown`);
+    log.success(`PUT Signal notification sent`);
 };
 
 const sendTelegramMessage = async (message) => {
