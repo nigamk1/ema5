@@ -9,8 +9,13 @@
     "dev": "node bot-improved.js",
     "test": "node test-config.js",
     "test-config": "node test-config.js",
+    "test-tokens": "node test-token-manager.js",
     "setup": "node setup.js",
     "setup-realtime": "node setup-realtime.js",
+    "setup-tokens": "node setup-tokens.js setup",
+    "setup-production": "node setup-production.js",
+    "check-token": "node setup-tokens.js check",
+    "refresh-token": "node setup-tokens.js refresh",
     "example": "node ema-example.js"
   },
   "keywords": [

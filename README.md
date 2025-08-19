@@ -76,11 +76,36 @@ npm install
 
 ### 3. Setup Instructions
 
-#### Upstox API Setup:
+#### Option A: Automatic Token Refresh (Recommended)
+
+**Set up once and never worry about token expiry again!**
+
+1. **Get OAuth Credentials**:
+   - Visit [Upstox Developer Console](https://api.upstox.com/developer-console)
+   - Create a new app or use existing one
+   - Set Redirect URI: `http://localhost:3000/callback`
+   - Copy your Client ID and Client Secret
+
+2. **Run Setup Script**:
+   ```bash
+   npm run setup-tokens
+   ```
+   
+3. **Follow the prompts**:
+   - Enter your Client ID and Client Secret
+   - Open the authorization URL in your browser
+   - Complete OAuth flow and get authorization code
+   - Paste the code back into the script
+
+4. **Done!** Your tokens will now automatically refresh every day.
+
+#### Option B: Manual Token Updates (Not Recommended)
+
 1. Register at [Upstox Developer Console](https://api.upstox.com/)
 2. Create a new app and get your API credentials
 3. Generate an access token using the OAuth flow
 4. Add the access token to your `.env` file
+5. **Note**: You'll need to manually update tokens daily
 
 #### Telegram Bot Setup:
 1. Message [@BotFather](https://t.me/botfather) on Telegram
@@ -99,6 +124,33 @@ npm start
 
 # For development with debug logs
 LOG_LEVEL=debug npm start
+```
+
+## 🔧 Token Management Commands
+
+With automatic token refresh enabled, you have these commands available:
+
+```bash
+# Complete setup for automatic token refresh (run once)
+npm run setup-tokens
+
+# Check current token status and expiry
+npm run check-token
+
+# Manually refresh token if needed
+npm run refresh-token
+
+# Test your configuration
+npm run test-config
+```
+
+**Example token status check:**
+```
+🔍 Current Token Status:
+Expired: ✅ NO
+Needs Refresh: ✅ NO
+Expires At: 19/8/2025, 11:30:00 pm
+Time Until Expiry: 8h 45m
 ```
 
 ## 📊 How It Works

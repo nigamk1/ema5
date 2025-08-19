@@ -4,6 +4,7 @@ const http = require('http');
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
 const https = require('https');
+const { ProductionTokenManager } = require('./setup-production');
 
 // Configuration from environment variables
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -14,6 +15,9 @@ const ENCODED_INSTRUMENT_KEY = encodeURIComponent(INSTRUMENT_KEY); // For REST A
 const EMA_PERIOD = parseInt(process.env.EMA_PERIOD) || 5;
 const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
 const PORT = process.env.PORT || 10000;
+
+// Initialize production token manager
+const tokenManager = new ProductionTokenManager();
 
 // Global state variables for real-time monitoring
 let isRunning = false;
@@ -658,7 +662,9 @@ const processQuoteData = (response) => {
 // Health server
 const createHealthServer = () => {
     const server = http.createServer((req, res) => {
-        if (req.url === '/health' && req.method === 'GET') {
+        const url = new URL(req.url, `http://${req.headers.host}`);
+        
+        if (url.pathname === '/health' && req.method === 'GET') {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
                 status: 'healthy',
@@ -671,7 +677,73 @@ const createHealthServer = () => {
                 candlesGenerated: candleData.length,
                 lastCandle: lastCandleTimestamp ? new Date(lastCandleTimestamp).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'None'
             }));
-        } else if (req.url === '/' && req.method === 'GET') {
+        } else if (url.pathname === '/callback' && req.method === 'GET') {
+            // OAuth callback handler for production token refresh
+            const authCode = url.searchParams.get('code');
+            const state = url.searchParams.get('state');
+            
+            res.writeHead(200, { 'Content-Type': 'text/html' });
+            
+            if (authCode) {
+                res.end(`
+                    <html>
+                        <head>
+                            <title>Authorization Successful</title>
+                            <style>
+                                body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+                                .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 600px; margin: 0 auto; }
+                                .success { color: #28a745; font-size: 24px; margin-bottom: 20px; }
+                                .code { background: #f8f9fa; padding: 15px; border-radius: 5px; font-family: monospace; word-break: break-all; margin: 15px 0; }
+                                .info { background: #d1ecf1; padding: 15px; border-radius: 5px; margin: 15px 0; }
+                                .btn { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+                            </style>
+                        </head>
+                        <body>
+                            <div class="container">
+                                <div class="success">✅ Authorization Successful!</div>
+                                <p>Your Upstox authorization was successful. The authorization code has been received.</p>
+                                
+                                <div class="info">
+                                    <strong>📋 Next Steps for Production Setup:</strong><br>
+                                    1. Your authorization code: <div class="code">${authCode}</div>
+                                    2. Use this code to complete the token setup via your deployment environment
+                                    3. Your app will automatically refresh tokens from now on
+                                </div>
+                                
+                                <div class="info">
+                                    <strong>🔄 For Automatic Setup (if running locally):</strong><br>
+                                    Run this command with your authorization code:<br>
+                                    <div class="code">npm run refresh-token</div>
+                                </div>
+                                
+                                <div class="info">
+                                    <strong>🚀 Production Deployment:</strong><br>
+                                    Your app is now authorized and will automatically handle token refresh in production.
+                                    No further manual intervention required!
+                                </div>
+                                
+                                <p>You can close this window. Your EMA(5) Alert System is ready!</p>
+                                
+                                <button class="btn" onclick="window.close()">Close Window</button>
+                            </div>
+                        </body>
+                    </html>
+                `);
+            } else {
+                res.end(`
+                    <html>
+                        <head><title>Authorization Error</title></head>
+                        <body>
+                            <div class="container">
+                                <h1>❌ Authorization Failed</h1>
+                                <p>No authorization code received. Please try again.</p>
+                                <p>State: ${state || 'None'}</p>
+                            </div>
+                        </body>
+                    </html>
+                `);
+            }
+        } else if (url.pathname === '/' && req.method === 'GET') {
             res.writeHead(200, { 'Content-Type': 'text/html' });
             res.end(`
                 <html>
@@ -758,6 +830,19 @@ const main = async () => {
     
     // Validate configuration
     validateConfig();
+    
+    // Initialize token auto-refresh if credentials are available
+    if (process.env.UPSTOX_CLIENT_ID && process.env.UPSTOX_CLIENT_SECRET) {
+        try {
+            log.info('🔄 Starting production automatic token refresh system...');
+            tokenManager.startProductionScheduler();
+        } catch (error) {
+            log.error(`Token manager initialization failed: ${error.message}`);
+            log.info('💡 To enable automatic token refresh, add UPSTOX_CLIENT_ID and UPSTOX_CLIENT_SECRET to environment variables');
+        }
+    } else {
+        log.info('💡 Automatic token refresh disabled. Add UPSTOX_CLIENT_ID and UPSTOX_CLIENT_SECRET to enable.');
+    }
     
     // Start health server
     const healthServer = createHealthServer();
