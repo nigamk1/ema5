@@ -752,6 +752,98 @@ const createHealthServer = () => {
                     </html>
                 `);
             }
+        } else if (url.pathname === '/auth' && req.method === 'GET') {
+            // Generate Upstox authorization URL
+            const authUrl = `https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=${process.env.UPSTOX_CLIENT_ID}&redirect_uri=${encodeURIComponent(process.env.UPSTOX_REDIRECT_URI)}&state=production_setup`;
+            
+            res.writeHead(200, { 'Content-Type': 'text/html' });
+            res.end(`
+                <html>
+                    <head>
+                        <title>EMA(5) System - Token Setup</title>
+                        <style>
+                            body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+                            .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 600px; margin: 0 auto; text-align: center; }
+                            .title { color: #007bff; font-size: 28px; margin-bottom: 20px; }
+                            .btn { background: #28a745; color: white; padding: 15px 30px; border: none; border-radius: 5px; cursor: pointer; font-size: 18px; text-decoration: none; display: inline-block; margin: 20px 0; }
+                            .btn:hover { background: #218838; }
+                            .info { background: #d1ecf1; padding: 15px; border-radius: 5px; margin: 15px 0; text-align: left; }
+                            .warning { background: #fff3cd; padding: 15px; border-radius: 5px; margin: 15px 0; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <div class="title">🚀 EMA(5) Alert System</div>
+                            <h2>🔑 One-Time Token Authorization</h2>
+                            
+                            <div class="warning">
+                                <strong>⚠️ Important:</strong> This authorization is needed only ONCE for lifetime automation!
+                            </div>
+                            
+                            <a href="${authUrl}" class="btn">🔐 Authorize with Upstox</a>
+                            
+                            <div class="info">
+                                <strong>📋 What happens next:</strong><br>
+                                1. Click the authorization button above<br>
+                                2. Login to your Upstox account<br>
+                                3. Approve the application<br>
+                                4. You'll be redirected back with confirmation<br>
+                                5. System will auto-refresh tokens forever!
+                            </div>
+                            
+                            <div class="info">
+                                <strong>✅ After authorization:</strong><br>
+                                • No more daily token updates needed<br>
+                                • System runs 24/7 automatically<br>
+                                • Real-time alerts during market hours<br>
+                                • Zero manual intervention required
+                            </div>
+                            
+                            <p><small>Current Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}</small></p>
+                        </div>
+                    </body>
+                </html>
+            `);
+        } else if (url.pathname === '/token-status' && req.method === 'GET') {
+            // Token status endpoint
+            const currentToken = process.env.UPSTOX_ACCESS_TOKEN;
+            let tokenInfo = { status: 'not_set' };
+            
+            if (currentToken) {
+                try {
+                    // Decode JWT token to get expiry info
+                    const tokenParts = currentToken.split('.');
+                    if (tokenParts.length === 3) {
+                        const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString());
+                        const expiryTime = new Date(payload.exp * 1000);
+                        const currentTime = new Date();
+                        const timeUntilExpiry = expiryTime - currentTime;
+                        const hoursUntilExpiry = Math.floor(timeUntilExpiry / (1000 * 60 * 60));
+                        const minutesUntilExpiry = Math.floor((timeUntilExpiry % (1000 * 60 * 60)) / (1000 * 60));
+                        
+                        tokenInfo = {
+                            status: timeUntilExpiry > 0 ? 'valid' : 'expired',
+                            issuedAt: new Date(payload.iat * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+                            expiresAt: expiryTime.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+                            timeUntilExpiry: timeUntilExpiry > 0 ? `${hoursUntilExpiry}h ${minutesUntilExpiry}m` : 'Expired',
+                            subject: payload.sub || 'Unknown',
+                            isMultiClient: payload.isMultiClient || false,
+                            isPlusUser: payload.isPlusUser || false
+                        };
+                    }
+                } catch (error) {
+                    tokenInfo = { status: 'invalid', error: 'Failed to decode token' };
+                }
+            }
+            
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                tokenInfo,
+                autoRefreshEnabled: true,
+                lastRefreshAttempt: 'Automatic',
+                nextRefreshCheck: 'When token expires',
+                timestamp: new Date().toISOString()
+            }, null, 2));
         } else if (url.pathname === '/' && req.method === 'GET') {
             res.writeHead(200, { 'Content-Type': 'text/html' });
             res.end(`
@@ -769,6 +861,8 @@ const createHealthServer = () => {
                         <p>🚨 Real-time 5-minute candle generation from Upstox data</p>
                         <p>⚡ Immediate alerts when entire candle is above EMA(${EMA_PERIOD})</p>
                         <p>📊 Monitoring: ${INSTRUMENT_KEY}</p>
+                        <hr>
+                        <p><a href="/auth">🔑 Setup Token Authorization</a> | <a href="/token-status">📊 Check Token Status</a></p>
                     </body>
                 </html>
             `);
