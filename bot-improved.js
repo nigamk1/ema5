@@ -19,6 +19,11 @@ const PORT = process.env.PORT || 10000;
 // Initialize production token manager
 const tokenManager = new ProductionTokenManager();
 
+// Keep-alive and stability configuration
+const KEEP_ALIVE_INTERVAL = 10 * 60 * 1000; // 10 minutes
+const MAX_CANDLE_HISTORY = 100; // Limit memory usage
+const MEMORY_CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
+
 // Global state variables for real-time monitoring
 let isRunning = false;
 let lastCandleTimestamp = null;
@@ -716,17 +721,7 @@ const createHealthServer = () => {
         
         if (url.pathname === '/health' && req.method === 'GET') {
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({
-                status: 'healthy',
-                service: 'EMA(5) Real-time Alert System',
-                timestamp: new Date().toISOString(),
-                uptime: process.uptime(),
-                isMarketOpen: isMarketOpen,
-                isConnected: isConnected,
-                useRestFallback: useRestFallback,
-                candlesGenerated: candleData.length,
-                lastCandle: lastCandleTimestamp ? new Date(lastCandleTimestamp).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'None'
-            }));
+            res.end(JSON.stringify(getEnhancedHealth()));
         } else if (url.pathname === '/callback' && req.method === 'GET') {
             // OAuth callback handler for production token refresh
             const authCode = url.searchParams.get('code');
@@ -964,6 +959,81 @@ const gracefulShutdown = () => {
     process.exit(0);
 };
 
+// Keep-alive mechanism to prevent Render from sleeping
+const startKeepAlive = () => {
+    log.info('🔄 Starting keep-alive mechanism to prevent server sleep...');
+    
+    setInterval(async () => {
+        try {
+            // Ping self to keep the app awake
+            const response = await axios.get(`http://localhost:${PORT}/health`, {
+                timeout: 5000
+            });
+            log.debug(`💓 Keep-alive ping successful - Uptime: ${response.data.uptime?.toFixed(1)}s`);
+        } catch (error) {
+            log.debug(`💓 Keep-alive ping failed: ${error.message}`);
+        }
+    }, KEEP_ALIVE_INTERVAL);
+};
+
+// Memory management - cleanup old candle data
+const manageMemory = () => {
+    log.info('🧹 Starting memory management...');
+    
+    setInterval(() => {
+        try {
+            // Limit candle data history to prevent memory buildup
+            if (candleData.length > MAX_CANDLE_HISTORY) {
+                const removed = candleData.length - MAX_CANDLE_HISTORY;
+                candleData = candleData.slice(-MAX_CANDLE_HISTORY);
+                log.debug(`🧹 Cleaned up ${removed} old candles to manage memory`);
+            }
+            
+            // Clear old tick data
+            if (tickData.length > 1000) {
+                tickData = tickData.slice(-100);
+                log.debug('🧹 Cleaned up old tick data');
+            }
+            
+            // Log memory usage
+            const memUsage = process.memoryUsage();
+            const memMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+            log.debug(`💾 Memory usage: ${memMB}MB`);
+            
+            // If memory usage is too high, force garbage collection
+            if (memMB > 100 && global.gc) {
+                global.gc();
+                log.debug('🧹 Forced garbage collection');
+            }
+            
+        } catch (error) {
+            log.error(`Memory management error: ${error.message}`);
+        }
+    }, MEMORY_CHECK_INTERVAL);
+};
+
+// Enhanced health check with memory stats
+const getEnhancedHealth = () => {
+    const memUsage = process.memoryUsage();
+    return {
+        status: 'healthy',
+        service: 'EMA(5) Real-time Alert System',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        isMarketOpen: isMarketOpen,
+        isConnected: isConnected,
+        useRestFallback: useRestFallback,
+        candlesGenerated: candleData.length,
+        lastCandle: lastCandleTimestamp ? new Date(lastCandleTimestamp).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'None',
+        memory: {
+            heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024),
+            heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024),
+            external: Math.round(memUsage.external / 1024 / 1024)
+        },
+        environment: process.env.NODE_ENV || 'development'
+    };
+};
+
 // Main execution function
 const main = async () => {
     log.info('🚀 Starting EMA(5) Real-time Alert System for Nifty 50');
@@ -1013,6 +1083,11 @@ const main = async () => {
     log.info('🔄 Real-time monitoring system started');
     log.info('🚨 Will generate 5-minute candles from live tick data');
     log.info('⚡ Will send immediate alerts when candles are above EMA');
+    
+    // Start stability features
+    startKeepAlive();
+    manageMemory();
+    log.info('🛡️ Stability features enabled: keep-alive + memory management');
     
     return { healthServer };
 };
