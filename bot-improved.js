@@ -46,13 +46,18 @@ const log = {
 
 // Validate required environment variables
 const validateConfig = () => {
-    const required = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'UPSTOX_ACCESS_TOKEN'];
+    const required = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID'];
     const missing = required.filter(key => !process.env[key]);
     
     if (missing.length > 0) {
         log.error(`Missing required environment variables: ${missing.join(', ')}`);
         log.error('Please check your .env file. Use .env.example as a template.');
         process.exit(1);
+    }
+    
+    // Check if UPSTOX_ACCESS_TOKEN exists, but don't exit if missing (will use refresh flow)
+    if (!process.env.UPSTOX_ACCESS_TOKEN) {
+        log.info('⚠️  UPSTOX_ACCESS_TOKEN not found - will attempt token refresh...');
     }
     
     log.info('Configuration validated successfully');
@@ -87,7 +92,26 @@ const startDataCollection = () => {
     if (!isRunning && isMarketOpen) {
         isRunning = true;
         initializeCandleTracking();
-        connectWebSocket();
+        
+        // Try WebSocket first, but have REST as backup
+        try {
+            connectWebSocket();
+            
+            // Set a timeout to start REST polling if WebSocket doesn't connect within 30 seconds
+            setTimeout(() => {
+                if (!isConnected && isMarketOpen && !useRestFallback) {
+                    log.info('🔄 WebSocket taking too long - starting REST fallback...');
+                    useRestFallback = true;
+                    startRestPolling();
+                }
+            }, 30000);
+            
+        } catch (error) {
+            log.error(`Failed to start WebSocket: ${error.message}`);
+            log.info('🔄 Starting REST API fallback immediately...');
+            useRestFallback = true;
+            startRestPolling();
+        }
     }
 };
 
@@ -539,6 +563,13 @@ const sendTelegramMessage = async (message) => {
 const onWebSocketError = (error) => {
     log.error(`WebSocket error: ${error.message}`);
     isConnected = false;
+    
+    // Don't crash the app - just log and continue with fallback
+    if (!useRestFallback) {
+        log.info('🔄 Switching to REST API fallback due to WebSocket error...');
+        useRestFallback = true;
+        startRestPolling();
+    }
 };
 
 const onWebSocketClose = (code, reason) => {
@@ -634,13 +665,23 @@ const pollData = async () => {
         log.error(`Error fetching quote: ${error.message}`);
         
         if (error.message.includes('401')) {
-            log.error('🔑 Token expired - please generate a new one');
-            return;
+            log.error('🔑 Token expired - trying to refresh automatically...');
+            // Don't return - continue polling in case token gets refreshed
         }
     }
 
-    // Schedule next poll
-    setTimeout(() => pollData(), 5000);
+    // Always schedule next poll to ensure continuous monitoring
+    if (isRunning && isMarketOpen) {
+        setTimeout(() => {
+            try {
+                pollData();
+            } catch (error) {
+                log.error(`Error in pollData: ${error.message}`);
+                // Continue polling even if there's an error
+                setTimeout(() => pollData(), 10000); // Longer delay on error
+            }
+        }, 5000);
+    }
 };
 
 const processQuoteData = (response) => {
@@ -988,6 +1029,17 @@ process.on('uncaughtException', (error) => {
 
 process.on('unhandledRejection', (reason, promise) => {
     log.error(`Unhandled Rejection at: ${promise}, reason: ${reason}`);
+    
+    // Don't exit the process for unhandled rejections in production
+    // Instead, continue running with REST fallback
+    if (!useRestFallback && isMarketOpen) {
+        log.info('🔄 Enabling REST fallback due to unhandled rejection...');
+        useRestFallback = true;
+        isConnected = false;
+        if (typeof startRestPolling === 'function') {
+            startRestPolling();
+        }
+    }
 });
 
 // Start the application
