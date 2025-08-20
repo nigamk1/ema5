@@ -357,24 +357,24 @@ const saveCandle = (candle) => {
 
 const processStrategy = async (newCandles) => {
     try {
-        // Need enough candles for EMA calculation
-        if (candleData.length < EMA_PERIOD + 1) {
-            log.info(`📊 Need more candles for EMA calculation. Have: ${candleData.length}, Need: ${EMA_PERIOD + 1}`);
+        // Need at least EMA_PERIOD candles to calculate EMA and check condition
+        if (candleData.length < EMA_PERIOD) {
+            log.info(`📊 Need more candles for EMA calculation. Have: ${candleData.length}, Need: ${EMA_PERIOD} (for EMA${EMA_PERIOD})`);
             return;
         }
         
-        // Get recent candles for EMA calculation
-        const recentCandles = candleData.slice(-Math.max(EMA_PERIOD + 10, candleData.length));
+        // Get all available candles (we'll use the last EMA_PERIOD for EMA calculation)
+        const allCandles = candleData.slice();
         
-        // Extract close prices for EMA calculation (all except the very latest)
-        const closePrices = recentCandles.slice(0, -1).map(candle => parseFloat(candle[4]));
+        // Extract close prices from the last EMA_PERIOD candles for EMA calculation
+        const closePrices = allCandles.slice(-EMA_PERIOD).map(candle => parseFloat(candle[4]));
         
-        // Calculate EMA(5)
+        // Calculate EMA(5) from these close prices
         const emaValues = calculateEMA(closePrices, EMA_PERIOD);
         const currentEMA = emaValues[emaValues.length - 1];
         
-        // Get the latest completed candle for analysis
-        const [timestamp, open, high, low, close] = recentCandles[recentCandles.length - 1];
+        // Get the latest completed candle for analysis (this is the candle we're checking against EMA)
+        const [timestamp, open, high, low, close] = allCandles[allCandles.length - 1];
         const latestCandle = {
             timestamp: new Date(timestamp).toLocaleString('en-IN', { 
                 timeZone: 'Asia/Kolkata',
@@ -449,6 +449,15 @@ const calculateEMA = (prices, period) => {
     }
     
     const k = 2 / (period + 1);
+    
+    // For exactly 5 prices, we can calculate EMA more efficiently
+    if (prices.length === period) {
+        // Calculate SMA for initialization
+        const sma = prices.reduce((sum, price) => sum + price, 0) / period;
+        return [sma]; // Return the EMA value (which equals SMA for exactly 5 data points)
+    }
+    
+    // For more than 5 prices, calculate progressive EMA
     let emaArray = [];
     
     // Initialize with SMA for the first period
